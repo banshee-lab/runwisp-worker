@@ -25,11 +25,3 @@ jobs:
           telegram_token: ${{ secrets.TELEGRAM_TOKEN }}
           telegram_to: ${{ secrets.TELEGRAM_TO }}
           commit_message: runwisp
-
-      - name: Build, Push Tools
-        uses: banshee-lab/docker-deploy-action@main
-        with:
-          username: dahool
-          password: ${{ secrets.GH_TOKEN }}
-          image_tag: tools
-          dockerfile: "./DockerfileTools"
