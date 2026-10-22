@@ -1,0 +1,78 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build_and_publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract runwisp base version from Dockerfile
+        id: base_version
+        run: |
+          # Extracts e.g. "1.7.1" from "FROM runwisp/runwisp:1.7.1-debian-docker"
+          BASE=$(grep -oP 'runwisp/runwisp:\K[0-9]+\.[0-9]+\.[0-9]+' Dockerfile)
+          echo "version=${BASE}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute next build number
+        id: next_build
+        run: |
+          BASE_VERSION="${{ steps.base_version.outputs.version }}"
+          GH_TOKEN="${{ secrets.GH_TOKEN }}"
+
+          # Query the GitHub Packages API for all versions of this container image
+          TAGS=$(curl -s \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/user/packages/container/runwisp-worker/versions?per_page=100" \
+          | jq -r '.[].metadata.container.tags[]? // empty' 2>/dev/null || true)
+
+          # Find the highest X for tags matching "BASE_VERSION-X"
+          MAX=-1
+          while IFS= read -r tag; do
+            if [[ "$tag" =~ ^${BASE_VERSION}-([0-9]+)$ ]]; then
+              N="${BASH_REMATCH[1]}"
+              if [ "$N" -gt "$MAX" ]; then MAX=$N; fi
+            fi
+          done <<< "$TAGS"
+
+          NEXT=$((MAX + 1))
+          FULL_TAG="${BASE_VERSION}-${NEXT}"
+          echo "tag=${FULL_TAG}" >> "$GITHUB_OUTPUT"
+          echo "Computed tag: ${FULL_TAG}"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: dahool
+          password: ${{ secrets.GH_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/dahool/runwisp-worker:${{ steps.next_build.outputs.tag }}
+            ghcr.io/dahool/runwisp-worker:latest
+
+      - name: Notify Komodo and Telegram
+        uses: banshee-lab/docker-deploy-action@main
+        with:
+          username: dahool
+          password: ${{ secrets.GH_TOKEN }}
+          komodo_address: ${{ vars.KOMODO_URL }}
+          komodo_api_key: ${{ secrets.KOMODO_API_KEY }}
+          komodo_api_secret: ${{ secrets.KOMODO_API_SECRET }}
+          stack_name: ${{ vars.STACK_NAME }}
+          telegram_token: ${{ secrets.TELEGRAM_TOKEN }}
+          telegram_to: ${{ secrets.TELEGRAM_TO }}
+          commit_message: runwisp ${{ steps.next_build.outputs.tag }}
