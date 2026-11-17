@@ -1,4 +1,4 @@
-FROM runwisp/runwisp:1.8.0-debian-docker
+FROM runwisp/runwisp:1.10.0-debian-docker
 
 ENV DEBIAN_FRONTEND=noninteractive
 
